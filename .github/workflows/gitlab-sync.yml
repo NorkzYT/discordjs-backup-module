@@ -4,8 +4,7 @@ name: ♻ GitlabSync
 on:
   - push
   - delete
-  workflow_dispatch:
-
+  
 jobs:
   sync:
     runs-on: ubuntu-latest
