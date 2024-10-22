@@ -14,3 +14,4 @@ jobs:
           owner: NorkzYT
           base: master
           head: master
+        continue-on-error: true  # To fail silently
