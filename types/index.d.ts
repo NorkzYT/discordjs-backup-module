@@ -25,7 +25,8 @@ export declare interface CreateOptions {
     doNotBackup?: (string | { channels: string[] })[];
     toBackup?: (string | { channels: string[] })[];
     backupMembers?: boolean;
-    saveImages?: boolean | string;
+    /** "base64" = all attachments, "base64-images" = images only, false/unset = URLs only */
+    saveImages?: "base64" | "base64-images" | boolean;
     speed?: number;
     concurrency?: number;
     verbose?: boolean;
@@ -41,7 +42,7 @@ export declare interface LoadOptions {
     verbose?: boolean;
     doNotLoad?: (string | { channels: string[] })[];
     toLoad?: (string | { channels: string[] })[];
-    onStatusChange?: (status: BackupStatus) => void;
+    onStatusChange?: (status: LoadStatus) => void;
 }
 
 export declare interface SystemChannelData {
@@ -75,18 +76,20 @@ export declare interface BaseChannelData {
 }
 
 export declare interface MessageData {
+    oldId?: string;
     userId?: string;
     username: string;
     avatar?: string;
     content?: string;
     embeds?: Embed[];
     components?: MessageComponent[];
-    files?: Object;
+    files?: Array<{ name: string; attachment: string }>;
     pinned?: boolean;
     sentAt: string;
 }
 
 export declare interface ThreadChannelData {
+    id?: string;
     type: ThreadChannelType;
     name: string;
     archived: boolean;
@@ -223,7 +226,7 @@ export declare interface BackupInfo {
 
 export declare function fetch(backupId: string): Promise<BackupInfo>;
 export declare function create(guild: Guild, options?: CreateOptions): Promise<BackupData>;
-export declare function load(backup: Object, guild: Guild, options?: LoadOptions): Promise<BackupData>;
+export declare function load(backup: string | BackupData, guild: Guild, options?: LoadOptions): Promise<BackupData>;
 export declare function remove(backupId: string): Promise<void>;
 export declare function list(): string[];
 export declare function setStorageFolder(pathname: string): void;

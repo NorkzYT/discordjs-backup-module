@@ -93,63 +93,105 @@ export async function fetchStageChannelData(channel, options, limiter) {
     }
 }
 
-/* fetches the messages from a channel */
+/**
+ * Fetches messages from a channel with concurrency, batching, and rate-limiting.
+ * @param {Object} channel - The Discord.js channel object to fetch messages from.
+ * @param {Object} options - Options to configure fetching (e.g., maxMessagesPerChannel).
+ * @param {Bottleneck} limiter - Bottleneck limiter for controlling API request rate.
+ * @returns {Promise<Array>} - Resolves to an array of fetched messages.
+ */
 export async function fetchChannelMessages(channel, options, limiter) {
     const messages = [];
-    const messageCount = isNaN(options.maxMessagesPerChannel) ? 10 : options.maxMessagesPerChannel;
-    const fetchOptions = { limit: (messageCount < 100) ? messageCount : 100 };
-
+    const maxMessages = options.maxMessagesPerChannel || 10;
+    const fetchOptions = { limit: Math.min(maxMessages, 100) };
     let lastMessageId;
     let fetchComplete = false;
+    let batchCount = 0;
+
+    if (options.verbose) console.log(`[fetchChannelMessages] Starting fetch for channel ${channel.id} with max ${maxMessages} messages`);
 
     while (!fetchComplete) {
         if (lastMessageId) fetchOptions.before = lastMessageId;
 
-        const fetched = await limiter.schedule({ id: `fetchChannelMessages::channel.messages.fetch::${channel.id}` }, () => channel.messages.fetch(fetchOptions));
-        if (fetched.size == 0) break;
+        const batchLabel = `[${channel.id}] Batch ${batchCount} Fetch Time`;
+        if (options.verbose) console.time(batchLabel);
 
-        lastMessageId = fetched.last().id;
+        try {
+            const fetched = await limiter.schedule(() =>
+                channel.messages.fetch(fetchOptions)
+            );
 
-        await Promise.all(fetched.map(async (message) => {
-            if (!message.author || messages.length >= messageCount) {
-                fetchComplete = true;
-                return;
+            if (options.verbose) {
+                console.timeEnd(batchLabel);
+                console.log(`[fetchChannelMessages] Channel ${channel.id}, Batch ${batchCount}: Fetched ${fetched.size} messages`);
             }
 
-            // Avoid backing up very long messages (content length > 2000 characters)
-            if (message.cleanContent.length > 2000) return;
+            if (fetched.size === 0) break;
+            lastMessageId = fetched.last().id;
+            batchCount++;
 
-            // Fetch and process attachments (base64 encoding for images)
-            const files = await Promise.all(message.attachments.map(async (attachment) => {
-                const fileExtension = attachment.url.split('.').pop().toLowerCase();
-                if (["png", "jpg", "jpeg", "jpe", "jif", "jfif", "jfi"].includes(fileExtension) && options.saveImages && options.saveImages == "base64") {
-                    const response = await axios.get(attachment.url, { responseType: "arraybuffer" });
-                    const buffer = Buffer.from(response.data, "binary").toString("base64");
-                    return { name: attachment.name, attachment: buffer };
-                }
+            await Promise.all(
+                fetched.map(async (message) => {
+                    if (!message.author || messages.length >= maxMessages) {
+                        fetchComplete = true;
+                        return;
+                    }
 
-                return { name: attachment.name, attachment: attachment.url };
-            }));
+                    if (message.cleanContent.length > 2000) return;
 
-            // Store message and attachments together
-            messages.push({
-                oldId: message.id,
-                userId: message.author.id,
-                username: message.author.username,
-                avatar: message.author.displayAvatarURL(),
-                content: message.cleanContent,
-                embeds: message.embeds,
-                components: message.components,
-                files: files,
-                pinned: message.pinned,
-                sentAt: message.createdAt.toISOString()
-            });
-        }));
+                    const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"];
+                    const files = await Promise.all(
+                        message.attachments.map(async (attachment) => {
+                            if (options.saveImages === "base64") {
+                                // base64 encode ALL attachments (images + files)
+                                try {
+                                    const response = await axios.get(attachment.url, { responseType: "arraybuffer" });
+                                    return { name: attachment.name, attachment: Buffer.from(response.data, "binary").toString("base64") };
+                                } catch {
+                                    return { name: attachment.name, attachment: attachment.url };
+                                }
+                            } else if (options.saveImages === "base64-images") {
+                                // base64 encode images only, URLs for everything else
+                                const ext = attachment.name?.split('.').pop()?.toLowerCase();
+                                if (ext && IMAGE_EXTENSIONS.includes(ext)) {
+                                    try {
+                                        const response = await axios.get(attachment.url, { responseType: "arraybuffer" });
+                                        return { name: attachment.name, attachment: Buffer.from(response.data, "binary").toString("base64") };
+                                    } catch {
+                                        return { name: attachment.name, attachment: attachment.url };
+                                    }
+                                }
+                                return { name: attachment.name, attachment: attachment.url };
+                            }
+                            // Default: store URLs only
+                            return { name: attachment.name, attachment: attachment.url };
+                        })
+                    );
+
+                    messages.push({
+                        oldId: message.id,
+                        userId: message.author.id,
+                        username: message.author.username,
+                        avatar: message.author.displayAvatarURL(),
+                        content: message.cleanContent,
+                        embeds: message.embeds,
+                        components: message.components,
+                        files: files,
+                        pinned: message.pinned,
+                        sentAt: message.createdAt.toISOString(),
+                    });
+                })
+            );
+        } catch (error) {
+            console.error(`[fetchChannelMessages] Error in Channel ${channel.id}, Batch ${batchCount}: ${error.message}`);
+            fetchComplete = true;
+        }
+
+        if (options.verbose) console.log(`[fetchChannelMessages] Channel ${channel.id}: ${messages.length} messages fetched so far`);
     }
 
-    // Ensure the messages are sorted by their creation time to maintain correct order.
     messages.sort((a, b) => new Date(a.sentAt) - new Date(b.sentAt));
-
+    if (options.verbose) console.log(`[fetchChannelMessages] Completed fetching for channel ${channel.id}, total messages fetched: ${messages.length}`);
     return messages;
 }
 
@@ -171,7 +213,7 @@ export async function fetchTextChannelData(channel, options, limiter) {
     };
 
     if (channel.threads.cache.size > 0) {
-        channel.threads.cache.forEach(async (thread) => {
+        for (const thread of channel.threads.cache.values()) {
             const threadData = {
                 id: thread.id,
                 type: thread.type,
@@ -185,11 +227,11 @@ export async function fetchTextChannelData(channel, options, limiter) {
 
             try {
                 threadData.messages = await fetchChannelMessages(thread, options, limiter);
-                channelData.threads.push(threadData);
             } catch {
-                channelData.threads.push(threadData);
+                // Keep empty messages on failure
             }
-        });
+            channelData.threads.push(threadData);
+        }
     }
 
     try {
@@ -371,6 +413,18 @@ export async function loadChannel(channelData, guild, category, options, limiter
                 if (webhook) await loadMessages(thread, threadData.messages, webhook);
             }
         }
+
+        // Clean up the temporary webhook used for message restoration
+        if (webhook) {
+            try {
+                await limiter.schedule(
+                    { id: `loadChannel::webhook.delete::${channel.id}` },
+                    () => webhook.delete("Backup restoration complete")
+                );
+            } catch {
+                // Webhook may already be deleted
+            }
+        }
     }
 
     return channel;
@@ -379,21 +433,29 @@ export async function loadChannel(channelData, guild, category, options, limiter
 /* delete all roles, channels, emojis, etc of a guild */
 export async function clearGuild(guild, limiter) {
     const roles = guild.roles.cache.filter((role) => !role.managed && role.editable && role.id != guild.id);
-    roles.forEach(async (role) => await limiter.schedule({ id: `clearGuild::role.delete::${role.id}` }, () => role.delete().catch((error) => console.error(`Error occurred while deleting roles: ${error.message}`))));
+    for (const role of roles.values()) {
+        await limiter.schedule({ id: `clearGuild::role.delete::${role.id}` }, () => role.delete().catch((error) => console.error(`Error occurred while deleting roles: ${error.message}`)));
+    }
 
-    guild.channels.cache.forEach(async (channel) => {
+    for (const channel of guild.channels.cache.values()) {
         if (channel?.deletable) {
             await limiter.schedule({ id: `clearGuild::channel.delete::${channel.id}` }, () => channel.delete().catch((error) => console.error(`Error occurred while deleting channels: ${error.message}`)));
         }
-    });
+    }
 
-    guild.emojis.cache.forEach(async (emoji) => await limiter.schedule({ id: `clearGuild::emoji.delete::${emoji.id}` }, () => emoji.delete().catch((error) => console.error(`Error occurred while deleting emojis: ${error.message}`))));
+    for (const emoji of guild.emojis.cache.values()) {
+        await limiter.schedule({ id: `clearGuild::emoji.delete::${emoji.id}` }, () => emoji.delete().catch((error) => console.error(`Error occurred while deleting emojis: ${error.message}`)));
+    }
 
     const webhooks = await limiter.schedule({ id: "clearGuild::guild.fetchWebhooks" }, () => guild.fetchWebhooks());
-    webhooks.forEach(async (webhook) => await limiter.schedule({ id: `clearGuild::webhook.delete::${webhook.id}` }, () => webhook.delete().catch((error) => console.error(`Error occurred while deleting webhooks: ${error.message}`))));
+    for (const webhook of webhooks.values()) {
+        await limiter.schedule({ id: `clearGuild::webhook.delete::${webhook.id}` }, () => webhook.delete().catch((error) => console.error(`Error occurred while deleting webhooks: ${error.message}`)));
+    }
 
     const bans = await limiter.schedule({ id: "clearGuild::guild.bans.fetch" }, () => guild.bans.fetch());
-    bans.forEach(async (ban) => await limiter.schedule({ id: `clearGuild::guild.members.unban::${ban.user.id}` }, () => guild.members.unban(ban.user).catch((error) => console.error(`Error occurred while deleting bans: ${error.message}`))));
+    for (const ban of bans.values()) {
+        await limiter.schedule({ id: `clearGuild::guild.members.unban::${ban.user.id}` }, () => guild.members.unban(ban.user).catch((error) => console.error(`Error occurred while deleting bans: ${error.message}`)));
+    }
 
     await limiter.schedule({ id: "clearGuild::guild.setAFKChannel" }, () => guild.setAFKChannel(null));
     await limiter.schedule({ id: "clearGuild::guild.setAFKTimeout" }, () => guild.setAFKTimeout(60 * 5));
@@ -418,5 +480,7 @@ export async function clearGuild(guild, limiter) {
     await limiter.schedule({ id: "clearGuild::guild.setPremiumProgressBarEnabled" }, () => guild.setPremiumProgressBarEnabled(false));
 
     const rules = await limiter.schedule({ id: "clearGuild::guild.autoModerationRules.fetch" }, () => guild.autoModerationRules.fetch());
-    rules.forEach(async (rule) => await limiter.schedule({ id: `clearGuild::rule.delete::${rule.id}` }, () => rule.delete().catch((error) => console.error(`Error occurred while deleting automod rules: ${error.message}`))));
+    for (const rule of rules.values()) {
+        await limiter.schedule({ id: `clearGuild::rule.delete::${rule.id}` }, () => rule.delete().catch((error) => console.error(`Error occurred while deleting automod rules: ${error.message}`)));
+    }
 }

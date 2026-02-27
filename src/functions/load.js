@@ -365,11 +365,11 @@ export async function loadAutoModRules(guild, backup, limiter, options) {
             exemptRoles: autoModRule.exemptRoles?.map((exemptRole) => {
                 const filteredFirstRole = roles.filter(role => role.name === exemptRole.name && backup.roleMap[exemptRole.id] === role).first();
                 if (filteredFirstRole) return filteredFirstRole.id;
-            }),
+            }).filter(Boolean),
             exemptChannels: autoModRule.exemptChannels?.map((exemptChannel) => {
                 const filteredFirstChannel = channels.filter(channel => channel.name === exemptChannel.name && backup.channelMap[exemptChannel.id] === channel).first();
                 if (filteredFirstChannel) return filteredFirstChannel.id;
-            }),
+            }).filter(Boolean),
         };
 
         await limiter.schedule({ id: "loadAutoModRules::guild.autoModerationRules.create" }, () => guild.autoModerationRules.create(data));

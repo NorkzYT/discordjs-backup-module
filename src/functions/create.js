@@ -155,15 +155,19 @@ export async function getEmojis(guild, limiter, options) {
     const collectedEmojis = [];
 
     for (const emoji of emojis.values()) {
-        const info = `Backed up Emoji: ${emoji.name} (ID: ${emoji.id})`
-        if (emojis.length >= 50) break;
+        if (collectedEmojis.length >= 50) break;
 
+        const info = `Backed up Emoji: ${emoji.name} (ID: ${emoji.id})`;
         const data = { name: emoji.name };
 
-        if (options.saveImages && options.saveImages == "base64") {
-            const response = await axios.get(emoji.imageURL(), { responseType: "arraybuffer" });
-            data.base64 = Buffer.from(response.data, "binary").toString("base64");
-        } else {
+        try {
+            if (options.saveImages && options.saveImages == "base64") {
+                const response = await axios.get(emoji.imageURL(), { responseType: "arraybuffer" });
+                data.base64 = Buffer.from(response.data, "binary").toString("base64");
+            } else {
+                data.url = emoji.imageURL();
+            }
+        } catch {
             data.url = emoji.imageURL();
         }
 
