@@ -1,10 +1,10 @@
-import axios from "axios";
 import { ChannelType } from "discord.js";
-import { 
+import {
     fetchChannelPermissions,
     fetchTextChannelData,
     fetchVoiceChannelData,
     fetchStageChannelData,
+    fetchWithTimeout,
     logStatus
 } from "../utils";
 
@@ -162,7 +162,7 @@ export async function getEmojis(guild, limiter, options) {
 
         try {
             if (options.saveImages && options.saveImages == "base64") {
-                const response = await axios.get(emoji.imageURL(), { responseType: "arraybuffer" });
+                const response = await fetchWithTimeout(emoji.imageURL(), { responseType: "arraybuffer" });
                 data.base64 = Buffer.from(response.data, "binary").toString("base64");
             } else {
                 data.url = emoji.imageURL();

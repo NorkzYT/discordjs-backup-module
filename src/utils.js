@@ -10,6 +10,25 @@ import {
 } from "discord.js";
 import axios from "axios";
 
+const DOWNLOAD_TIMEOUT = 30_000; // 30 second timeout per download
+
+/**
+ * Fetch with a guaranteed timeout using AbortController.
+ * Works reliably in both Node.js and Bun runtimes (axios timeout alone hangs in Bun).
+ */
+export async function fetchWithTimeout(url, options = {}, timeoutMs = DOWNLOAD_TIMEOUT) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await axios.get(url, { ...options, signal: controller.signal });
+        clearTimeout(timeoutId);
+        return response;
+    } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
+    }
+}
+
 const MAX_BITRATE_PER_TIER = {
     [GuildPremiumTier.None]: 64000,
     [GuildPremiumTier.Tier1]: 128000,
@@ -145,7 +164,7 @@ export async function fetchChannelMessages(channel, options, limiter) {
                             if (options.saveImages === "base64") {
                                 // base64 encode ALL attachments (images + files)
                                 try {
-                                    const response = await axios.get(attachment.url, { responseType: "arraybuffer" });
+                                    const response = await fetchWithTimeout(attachment.url, { responseType: "arraybuffer" });
                                     return { name: attachment.name, attachment: Buffer.from(response.data, "binary").toString("base64") };
                                 } catch {
                                     return { name: attachment.name, attachment: attachment.url };
@@ -155,7 +174,7 @@ export async function fetchChannelMessages(channel, options, limiter) {
                                 const ext = attachment.name?.split('.').pop()?.toLowerCase();
                                 if (ext && IMAGE_EXTENSIONS.includes(ext)) {
                                     try {
-                                        const response = await axios.get(attachment.url, { responseType: "arraybuffer" });
+                                        const response = await fetchWithTimeout(attachment.url, { responseType: "arraybuffer" });
                                         return { name: attachment.name, attachment: Buffer.from(response.data, "binary").toString("base64") };
                                     } catch {
                                         return { name: attachment.name, attachment: attachment.url };

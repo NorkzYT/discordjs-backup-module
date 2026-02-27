@@ -1,9 +1,8 @@
 import { SnowflakeUtil, IntentsBitField, GatewayIntentBits, GuildMFALevel } from "discord.js";
 import Bottleneck from "bottleneck";
-import axios from "axios";
 import createFunctions from "./functions/create";
 import loadFunctions from "./functions/load";
-import { clearGuild } from "./utils";
+import { clearGuild, fetchWithTimeout } from "./utils";
 import path from "path";
 import url from "url";
 import fs from "fs";
@@ -11,7 +10,12 @@ import fs from "fs";
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 
 let backups = `${__dirname}/backups`;
-if (!fs.existsSync(backups)) fs.mkdirSync(backups);
+try {
+    if (!fs.existsSync(backups)) fs.mkdirSync(backups);
+} catch (error) {
+    // Ignore permission errors - storage path will be set via setStorageFolder()
+    if (error.code !== 'EACCES' && error.code !== 'EPERM') throw error;
+}
 
 /* checks if user has 2fa permissions for 2fa required requests, otherwise warns them */
 function check2FA(options, guild, permission) {
@@ -157,7 +161,7 @@ async function create(guild, options = {}) {
 
     if (guild.iconURL()) {
         if (options && options.saveImages && options.saveImages == "base64") {
-            const response = await axios.get(guild.iconURL({ dynamic: true }), { responseType: "arraybuffer" });
+            const response = await fetchWithTimeout(guild.iconURL({ dynamic: true }), { responseType: "arraybuffer" });
             backup.iconBase64 = Buffer.from(response.data, "binary").toString("base64");
         }
 
@@ -166,7 +170,7 @@ async function create(guild, options = {}) {
 
     if (guild.splashURL()) {
         if (options && options.saveImages && options.saveImages == "base64") {
-            const response = await axios.get(guild.splashURL(), { responseType: "arraybuffer" });
+            const response = await fetchWithTimeout(guild.splashURL(), { responseType: "arraybuffer" });
             backup.splashBase64 = Buffer.from(response.data, "binary").toString("base64");
         }
 
@@ -175,7 +179,7 @@ async function create(guild, options = {}) {
 
     if (guild.bannerURL()) {
         if (options && options.saveImages && options.saveImages == "base64") {
-            const response = await axios.get(guild.bannerURL(), { responseType: "arraybuffer" });
+            const response = await fetchWithTimeout(guild.bannerURL(), { responseType: "arraybuffer" });
             backup.bannerBase64 = Buffer.from(response.data, "binary").toString("base64");
         }
 
