@@ -281,6 +281,24 @@ export async function loadCategory(categoryData, guild, limiter) {
     return category;
 }
 
+/**
+ * Resolves files for sending: converts base64 attachment strings back to Buffers
+ * so discord.js doesn't try to fs.stat() them as file paths (ENAMETOOLONG).
+ */
+function resolveFiles(files) {
+    if (!files || files.length === 0) return files;
+    return files.map(file => {
+        if (
+            typeof file.attachment === "string" &&
+            !file.attachment.startsWith("http://") &&
+            !file.attachment.startsWith("https://")
+        ) {
+            return { name: file.name, attachment: Buffer.from(file.attachment, "base64") };
+        }
+        return file;
+    });
+}
+
 /* creates a channel and returns it */
 export async function loadChannel(channelData, guild, category, options, limiter) {
     const restoredThreads = new Set();
@@ -329,7 +347,7 @@ export async function loadChannel(channelData, guild, category, options, limiter
                             content: message.content.length ? message.content : undefined,
                             embeds: message.embeds,
                             components: message.components,
-                            files: message.files,
+                            files: resolveFiles(message.files),
                             allowedMentions: options.allowedMentions
                         })
                     );
@@ -343,7 +361,7 @@ export async function loadChannel(channelData, guild, category, options, limiter
                             avatarURL: message.avatar,
                             embeds: message.embeds,
                             components: message.components,
-                            files: message.files,
+                            files: resolveFiles(message.files),
                             allowedMentions: options.allowedMentions,
                             threadId: channel.isThread() ? channel.id : undefined
                         })
